@@ -31,7 +31,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
     });
   }
 
-  async getUploadSignedUrl(key: string, contentType: string, expiresIn = 3600): Promise<string> {
+  async getUploadSignedUrl(key: string, contentType: string, expiresIn = 3600): Promise<{ uploadUrl: string, uploadExtraParams:  Record<string, string> }> {
     const tagline = `${CLEANUP_TAG_KEY}=true`;
     const command = new PutObjectCommand({
       Bucket: this.options.bucket,
@@ -40,7 +40,13 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       Key: key,
       Tagging: tagline,
     });
-    return await getSignedUrl(this.s3, command, { expiresIn, unhoistableHeaders: new Set(['x-amz-tagging']) } );
+    const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn, unhoistableHeaders: new Set(['x-amz-tagging']) });
+    return {
+      uploadUrl,
+      uploadExtraParams: {
+        'x-amz-tagging': tagline
+      }
+    };
   }
 
   async getDownloadUrl(key: string, expiresIn = 3600): Promise<string> {
@@ -74,7 +80,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       Bucket: this.options.bucket,
       Key: key,
       Tagging: {
-        TagSet: [{ Key: CLEANUP_TAG_KEY, Value: "false" }],
+        TagSet: [],
       },
     });
     await this.s3.send(command);
