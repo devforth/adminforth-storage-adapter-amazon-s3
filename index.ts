@@ -22,13 +22,6 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
 
   constructor(options: AdapterOptions) {
     this.options = options;
-    this.s3 = new S3Client({
-      region: this.options.region,
-      credentials: {
-        accessKeyId: this.options.accessKeyId,
-        secretAccessKey: this.options.secretAccessKey,
-      },
-    });
   }
 
   async getUploadSignedUrl(key: string, contentType: string, expiresIn = 3600): Promise<{ uploadUrl: string, uploadExtraParams:  Record<string, string> }> {
@@ -88,6 +81,16 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async setupLifecycle(): Promise<void> {
+    if (!this.options.accessKeyId || !this.options.secretAccessKey) {
+      throw new Error("Missing AWS credentials in environment variables");
+    }
+    this.s3 = new S3Client({
+      region: this.options.region,
+      credentials: {
+        accessKeyId: this.options.accessKeyId,
+        secretAccessKey: this.options.secretAccessKey,
+      },
+    });
     try {
       await this.s3.send(new HeadBucketCommand({ Bucket: this.options.bucket }));
     } catch {
