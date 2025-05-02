@@ -138,4 +138,8 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       console.log(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
     }
   }
+
+  objectCanBeAccesedPublicly(): Promise<boolean> {
+    return Promise.resolve(this.options.s3ACL === "public-read");
+  }
 }
