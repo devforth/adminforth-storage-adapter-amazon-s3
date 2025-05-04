@@ -9,6 +9,7 @@ import {
   PutBucketLifecycleConfigurationCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Readable } from 'stream';
 
 import type { StorageAdapter } from "adminforth";
 import type { AdapterOptions } from "./types.js";
@@ -56,7 +57,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
     return await getSignedUrl(this.s3, command, { expiresIn });
   }
 
-  async markKeyForDeletation(key: string): Promise<string> {
+  async markKeyForDeletation(key: string): Promise<void> {
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -65,10 +66,9 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       },
     });
     await this.s3.send(command);
-    return key;
   }
 
-  async markKeyForNotDeletation(key: string): Promise<string> {
+  async markKeyForNotDeletation(key: string): Promise<void> {
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -77,7 +77,6 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       },
     });
     await this.s3.send(command);
-    return key;
   }
 
   async setupLifecycle(): Promise<void> {
@@ -141,5 +140,35 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
 
   objectCanBeAccesedPublicly(): Promise<boolean> {
     return Promise.resolve(this.options.s3ACL === "public-read");
+  }
+
+  /**
+   * This method should return the key as a data URL (base64 encoded string).
+   * @param key - The key of the file to be converted to a data URL
+   * @returns A promise that resolves to a string containing the data URL
+   */
+  async getKeyAsDataURL(key: string): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.options.bucket,
+      Key: key,
+    });
+
+    const body = await this.s3.send(command);
+    const stream = body.Body;
+
+    if (!(stream instanceof Readable)) {
+      throw new Error("Expected Body to be a Readable stream");
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    const buffer = Buffer.concat(chunks);
+    const base64String = buffer.toString('base64');
+    const contentType = body.ContentType || 'application/octet-stream';
+
+    return `data:${contentType};base64,${base64String}`;
   }
 }
