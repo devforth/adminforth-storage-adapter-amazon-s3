@@ -49,7 +49,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       Key: key,
     });
     if (this.options.s3ACL === "public-read") {
-      return `https://${this.options.bucket}.s3.${this.options.region}.amazonaws.com/${key}`;
+      return `https://${this.options.bucket}/${key}`;
     }
     // If the bucket is private, generate a presigned URL
     // that expires in the specified time
