@@ -20,7 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",
     "@aws-sdk/s3-request-presigner": "^3.800.0",
-    "adminforth": "^1.21.0",
+    "adminforth": "^2.4.0-next.315",
     "typescript": "^5.7.3"
   }
 }
