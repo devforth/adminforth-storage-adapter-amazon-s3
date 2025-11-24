@@ -58,6 +58,14 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async markKeyForDeletation(key: string): Promise<void> {
+    throw new Error("Method \"markKeyForDeletation\" is deprecated, use markKeyForDeletion instead");
+  }
+
+  async markKeyForNotDeletation(key: string): Promise<void> {
+    throw new Error("Method \"markKeyForNotDeletation\" is deprecated, use markKeyForNotDeletion instead");
+  }
+
+  async markKeyForDeletion(key: string): Promise<void> {
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -68,7 +76,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
     await this.s3.send(command);
   }
 
-  async markKeyForNotDeletation(key: string): Promise<void> {
+  async markKeyForNotDeletion(key: string): Promise<void> {
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
