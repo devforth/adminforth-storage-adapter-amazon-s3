@@ -12,6 +12,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from 'stream';
 
 import type { StorageAdapter } from "adminforth";
+import { afLogger } from "adminforth";
 import type { AdapterOptions } from "./types.js";
 
 const CLEANUP_TAG_KEY = "adminforth-candidate-for-cleanup";
@@ -58,7 +59,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async markKeyForDeletation(key: string): Promise<void> {
-    console.error("Method \"markKeyForDeletation\" is deprecated, use markKeyForDeletion instead");
+    afLogger.error("Method \"markKeyForDeletation\" is deprecated, use markKeyForDeletion instead");
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -70,7 +71,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async markKeyForNotDeletation(key: string): Promise<void> {
-    console.error("Method \"markKeyForNotDeletation\" is deprecated, use markKeyForNotDeletion instead");
+    afLogger.error("Method \"markKeyForNotDeletation\" is deprecated, use markKeyForNotDeletion instead");
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -128,7 +129,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       ruleExists = res.Rules?.some((r) => r.ID === CLEANUP_RULE_ID) ?? false;
     } catch (e: any) {
       if (e.name !== "NoSuchLifecycleConfiguration") {
-        console.error(`Error checking lifecycle config:`, e);
+        afLogger.error(`Error checking lifecycle config: ${e}`);
         throw e;
       }
     }
@@ -156,9 +157,9 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
           },
         })
       );
-      console.log(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
+      afLogger.debug(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
     } else {
-      console.log(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
+      afLogger.debug(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
     }
   }
 
