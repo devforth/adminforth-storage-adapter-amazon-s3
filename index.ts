@@ -12,6 +12,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from 'stream';
 
 import type { StorageAdapter } from "adminforth";
+import { afLogger } from "adminforth";
 import type { AdapterOptions } from "./types.js";
 
 const CLEANUP_TAG_KEY = "adminforth-candidate-for-cleanup";
@@ -58,6 +59,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async markKeyForDeletation(key: string): Promise<void> {
+    afLogger.error("Method \"markKeyForDeletation\" is deprecated, use markKeyForDeletion instead");
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -69,6 +71,29 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async markKeyForNotDeletation(key: string): Promise<void> {
+    afLogger.error("Method \"markKeyForNotDeletation\" is deprecated, use markKeyForNotDeletion instead");
+    const command = new PutObjectTaggingCommand({
+      Bucket: this.options.bucket,
+      Key: key,
+      Tagging: {
+        TagSet: [],
+      },
+    });
+    await this.s3.send(command);
+  }
+
+  async markKeyForDeletion(key: string): Promise<void> {
+    const command = new PutObjectTaggingCommand({
+      Bucket: this.options.bucket,
+      Key: key,
+      Tagging: {
+        TagSet: [{ Key: CLEANUP_TAG_KEY, Value: "true" }],
+      },
+    });
+    await this.s3.send(command);
+  }
+
+  async markKeyForNotDeletion(key: string): Promise<void> {
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -104,7 +129,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       ruleExists = res.Rules?.some((r) => r.ID === CLEANUP_RULE_ID) ?? false;
     } catch (e: any) {
       if (e.name !== "NoSuchLifecycleConfiguration") {
-        console.error(`Error checking lifecycle config:`, e);
+        afLogger.error(`Error checking lifecycle config: ${e}`);
         throw e;
       }
     }
@@ -132,9 +157,9 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
           },
         })
       );
-      console.log(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
+      afLogger.debug(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
     } else {
-      console.log(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
+      afLogger.debug(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
     }
   }
 
