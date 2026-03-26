@@ -167,6 +167,24 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
     return Promise.resolve(this.options.s3ACL === "public-read");
   }
 
+  async isInternalUrl(url: string): Promise<boolean> {
+    try {
+      const parsedUrl = new URL(url);
+      const standardHost = `${this.options.bucket}.s3.${this.options.region}.amazonaws.com`;
+      const legacyHost = `${this.options.bucket}.s3.amazonaws.com`;
+      
+      if (parsedUrl.hostname === standardHost || parsedUrl.hostname === legacyHost) {
+        return true;
+      }
+
+      if (parsedUrl.hostname.includes('amazonaws.com') && parsedUrl.pathname.startsWith(`/${this.options.bucket}/`)) {
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
   /**
    * This method should return the key as a data URL (base64 encoded string).
    * @param key - The key of the file to be converted to a data URL
