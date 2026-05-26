@@ -19,8 +19,8 @@ const CLEANUP_TAG_KEY = "adminforth-candidate-for-cleanup";
 const CLEANUP_RULE_ID = "adminforth-unused-cleaner";
 
 export default class AdminForthAdapterS3Storage implements StorageAdapter {
-  private s3: S3Client;
-  private options: AdapterOptions;
+  protected s3: S3Client;
+  protected options: AdapterOptions;
 
   constructor(options: AdapterOptions) {
     this.options = options;
