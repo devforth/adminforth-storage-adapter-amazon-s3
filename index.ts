@@ -60,29 +60,16 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
 
   async markKeyForDeletation(key: string): Promise<void> {
     afLogger.error("Method \"markKeyForDeletation\" is deprecated, use markKeyForDeletion instead");
-    const command = new PutObjectTaggingCommand({
-      Bucket: this.options.bucket,
-      Key: key,
-      Tagging: {
-        TagSet: [{ Key: CLEANUP_TAG_KEY, Value: "true" }],
-      },
-    });
-    await this.s3.send(command);
+    await this.markKeyForDeletion(key);
   }
 
   async markKeyForNotDeletation(key: string): Promise<void> {
     afLogger.error("Method \"markKeyForNotDeletation\" is deprecated, use markKeyForNotDeletion instead");
-    const command = new PutObjectTaggingCommand({
-      Bucket: this.options.bucket,
-      Key: key,
-      Tagging: {
-        TagSet: [],
-      },
-    });
-    await this.s3.send(command);
+    await this.markKeyForNotDeletion(key);
   }
 
   async markKeyForDeletion(key: string): Promise<void> {
+    afLogger.debug(`Marking key "${key}" for deletion in bucket "${this.options.bucket}"`);
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
@@ -94,6 +81,7 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async markKeyForNotDeletion(key: string): Promise<void> {
+    afLogger.debug(`Unmarking key "${key}" for deletion in bucket "${this.options.bucket}"`);
     const command = new PutObjectTaggingCommand({
       Bucket: this.options.bucket,
       Key: key,
