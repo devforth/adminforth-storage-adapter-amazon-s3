@@ -7,6 +7,7 @@ import {
   ObjectCannedACL,
   GetBucketLifecycleConfigurationCommand,
   PutBucketLifecycleConfigurationCommand,
+  LifecycleRule,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from 'stream';
@@ -21,6 +22,14 @@ const CLEANUP_RULE_ID = "adminforth-unused-cleaner";
 export default class AdminForthAdapterS3Storage implements StorageAdapter {
   protected s3: S3Client;
   protected options: AdapterOptions;
+
+  // Shared across all adapter instances in this process. Many instances
+  // (one per resource/column) call setupLifecycle concurrently against the
+  // same bucket; a bare Set would still race (check-then-act), so we cache
+  // the in-flight promise per bucket and let concurrent callers await it.
+  // This also prevents concurrent PutBucketLifecycleConfiguration calls that
+  // S3 rejects with "OperationAborted" (409).
+  private static lifecycleSetupByBucket: Map<string, Promise<void>> = new Map();
 
   constructor(options: AdapterOptions) {
     this.options = options;
@@ -109,46 +118,64 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       throw new Error(`Bucket "${this.options.bucket}" does not exist`);
     }
 
-    let ruleExists = false;
+    const bucket = this.options.bucket;
+    let setupPromise = AdminForthAdapterS3Storage.lifecycleSetupByBucket.get(bucket);
+    if (!setupPromise) {
+      setupPromise = this.ensureCleanupLifecycleRule();
+      AdminForthAdapterS3Storage.lifecycleSetupByBucket.set(bucket, setupPromise);
+      // On failure, drop the cached promise so a later call can retry instead
+      // of permanently reusing a rejected result.
+      setupPromise.catch(() => {
+        AdminForthAdapterS3Storage.lifecycleSetupByBucket.delete(bucket);
+      });
+    }
+    await setupPromise;
+  }
+
+  private async ensureCleanupLifecycleRule(): Promise<void> {
+    let existingRules: LifecycleRule[] = [];
     try {
       const res = await this.s3.send(
         new GetBucketLifecycleConfigurationCommand({ Bucket: this.options.bucket })
       );
-      ruleExists = res.Rules?.some((r) => r.ID === CLEANUP_RULE_ID) ?? false;
+      existingRules = res.Rules ?? [];
     } catch (e: any) {
       if (e.name !== "NoSuchLifecycleConfiguration") {
         afLogger.error(`Error checking lifecycle config: ${e}`);
         throw e;
       }
     }
-
-    if (!ruleExists) {
-      await this.s3.send(
-        new PutBucketLifecycleConfigurationCommand({
-          Bucket: this.options.bucket,
-          LifecycleConfiguration: {
-            Rules: [
-              {
-                ID: CLEANUP_RULE_ID,
-                Status: "Enabled",
-                Filter: {
-                  Tag: {
-                    Key: CLEANUP_TAG_KEY,
-                    Value: "true",
-                  },
-                },
-                Expiration: {
-                  Days: 2,
-                },
-              },
-            ],
-          },
-        })
-      );
-      afLogger.debug(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
-    } else {
-      afLogger.debug(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
+    const ruleExists = existingRules.some((r) => r.ID === CLEANUP_RULE_ID);
+    afLogger.info(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" exists: ${ruleExists}`);
+    if (ruleExists) {
+      afLogger.info(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
+      return;
     }
+
+    const cleanupRule: LifecycleRule = {
+      ID: CLEANUP_RULE_ID,
+      Status: "Enabled",
+      Filter: {
+        Tag: {
+          Key: CLEANUP_TAG_KEY,
+          Value: "true",
+        },
+      },
+      Expiration: {
+        Days: 2,
+      },
+    };
+    await this.s3.send(
+      new PutBucketLifecycleConfigurationCommand({
+        Bucket: this.options.bucket,
+        LifecycleConfiguration: {
+          // Preserve any existing rules; PutBucketLifecycleConfiguration
+          // replaces the whole configuration, so we merge instead of overwrite.
+          Rules: [...existingRules, cleanupRule],
+        },
+      })
+    );
+    afLogger.info(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
   }
 
   objectCanBeAccesedPublicly(): Promise<boolean> {
