@@ -23,6 +23,7 @@ import type { AdapterOptions, ObjectWriter } from "./types.js";
 
 const CLEANUP_TAG_KEY = "adminforth-candidate-for-cleanup";
 const CLEANUP_RULE_ID = "adminforth-unused-cleaner";
+const INCOMPLETE_UPLOADS_RULE_ID = "adminforth-incomplete-uploads-cleaner";
 
 export default class AdminForthAdapterS3Storage implements StorageAdapter {
   protected s3: S3Client;
@@ -150,12 +151,6 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
         throw e;
       }
     }
-    const ruleExists = existingRules.some((r) => r.ID === CLEANUP_RULE_ID);
-    afLogger.info(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" exists: ${ruleExists}`);
-    if (ruleExists) {
-      afLogger.info(`ℹ️ Lifecycle rule "${CLEANUP_RULE_ID}" already exists.`);
-      return;
-    }
 
     const cleanupRule: LifecycleRule = {
       ID: CLEANUP_RULE_ID,
@@ -170,17 +165,35 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
         Days: 2,
       },
     };
+
+    const incompleteUploadsRule: LifecycleRule = {
+      ID: INCOMPLETE_UPLOADS_RULE_ID,
+      Status: "Enabled",
+      Filter: { Prefix: "" },
+      AbortIncompleteMultipartUpload: {
+        DaysAfterInitiation: 1,
+      },
+    };
+
+    const missingRules = [cleanupRule, incompleteUploadsRule].filter(
+      (rule) => !existingRules.some((r) => r.ID === rule.ID)
+    );
+    if (!missingRules.length) {
+      afLogger.info(`ℹ️ Lifecycle rules "${CLEANUP_RULE_ID}", "${INCOMPLETE_UPLOADS_RULE_ID}" already exist.`);
+      return;
+    }
+
     await this.s3.send(
       new PutBucketLifecycleConfigurationCommand({
         Bucket: this.options.bucket,
         LifecycleConfiguration: {
           // Preserve any existing rules; PutBucketLifecycleConfiguration
           // replaces the whole configuration, so we merge instead of overwrite.
-          Rules: [...existingRules, cleanupRule],
+          Rules: [...existingRules, ...missingRules],
         },
       })
     );
-    afLogger.info(`✅ Lifecycle rule "${CLEANUP_RULE_ID}" created.`);
+    afLogger.info(`✅ Lifecycle rule(s) ${missingRules.map((r) => `"${r.ID}"`).join(", ")} created.`);
   }
 
   objectCanBeAccesedPublicly(): Promise<boolean> {
