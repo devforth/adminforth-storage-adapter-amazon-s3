@@ -3,3 +3,5 @@ allowBuilds:
   better-sqlite3: true
 minimumReleaseAgeExclude:
   - adminforth@3.0.1
+  - adminforth@3.12.0
+  - adminforth@3.12.1

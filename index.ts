@@ -8,13 +8,18 @@ import {
   GetBucketLifecycleConfigurationCommand,
   PutBucketLifecycleConfigurationCommand,
   LifecycleRule,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
+  CompletedPart,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from 'stream';
 
 import type { StorageAdapter } from "adminforth";
 import { afLogger } from "adminforth";
-import type { AdapterOptions } from "./types.js";
+import type { AdapterOptions, ObjectWriter } from "./types.js";
 
 const CLEANUP_TAG_KEY = "adminforth-candidate-for-cleanup";
 const CLEANUP_RULE_ID = "adminforth-unused-cleaner";
@@ -228,5 +233,138 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
     const contentType = body.ContentType || 'application/octet-stream';
 
     return `data:${contentType};base64,${base64String}`;
+  }
+
+  /**
+   * Starts an S3 multipart upload  returns a writer which streams the data into it,
+   * so arbitrarily large files can be written without keeping them in memory.
+   * The object appears in the bucket only after close(); abort() discards the uploaded parts.
+   * @param key - The keandy of the file to be written e.g. "uploads/file.txt"
+   * @param contentType - The MIME type of the file to be written e.g. "image/png"
+   */
+  async createWriteStream(key: string, contentType: string, bufferSizeMb: number = 5): Promise<ObjectWriter> {
+    const bufferSize = bufferSizeMb * 1024 * 1024;
+    const bucket = this.options.bucket;
+    const { UploadId: uploadId } = await this.s3.send(
+      new CreateMultipartUploadCommand({
+        Bucket: bucket,
+        Key: key,
+        ContentType: contentType,
+        ACL: (this.options.s3ACL || 'private') as ObjectCannedACL,
+        Tagging: `${CLEANUP_TAG_KEY}=true`,
+      })
+    );
+    if (!uploadId) {
+      throw new Error(`S3 did not return UploadId for multipart upload of "${key}"`);
+    }
+    afLogger.debug(`Started multipart upload "${uploadId}" for key "${key}" in bucket "${bucket}"`);
+
+
+    const parts: CompletedPart[] = [];
+    let pending: Buffer[] = [];
+    let pendingLength = 0;
+    let partNumber = 0;
+    let finished = false;
+
+    let queue: Promise<unknown> = Promise.resolve();
+
+    const enqueue = <T>(fn: () => Promise<T>): Promise<T> => {
+      const result = queue.then(fn);
+      queue = result.catch(() => {});
+      return result;
+    };
+
+    const abortUpload = async (): Promise<void> => {
+      await this.s3.send(
+        new AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: uploadId })
+      );
+    };
+
+    const abortAfterFailure = async (e: unknown): Promise<never> => {
+      finished = true;
+      try {
+        await abortUpload();
+      } catch (abortError) {
+        afLogger.error(`Could not abort multipart upload "${uploadId}" for key "${key}": ${abortError}`);
+      }
+      throw e;
+    };
+
+    const uploadPart = async (body: Buffer): Promise<void> => {
+      partNumber += 1;
+      const currentPartNumber = partNumber;
+      const res = await this.s3.send(
+        new UploadPartCommand({
+          Bucket: bucket,
+          Key: key,
+          UploadId: uploadId,
+          PartNumber: currentPartNumber,
+          Body: body,
+        })
+      );
+      parts.push({ PartNumber: currentPartNumber, ETag: res.ETag });
+    };
+
+    const flushPending = async (): Promise<void> => {
+      const body = Buffer.concat(pending, pendingLength);
+      pending = [];
+      pendingLength = 0;
+      await uploadPart(body);
+    };
+
+    return {
+      write: (data: string | Buffer | Uint8Array): Promise<void> => enqueue(async () => {
+        if (finished) {
+          throw new Error(`Can't write to "${key}": the writer is already closed or aborted`);
+        }
+        const chunk = typeof data === 'string'
+          ? Buffer.from(data)
+          : Buffer.isBuffer(data) ? data : Buffer.from(data);
+        if (chunk.length === 0) {
+          return;
+        }
+        pending.push(chunk);
+        pendingLength += chunk.length;
+        if (pendingLength >= bufferSize) {
+          await flushPending().catch(abortAfterFailure);
+        }
+      }),
+
+      close: (): Promise<void> => enqueue(async () => {
+        if (finished) {
+          throw new Error(`Can't close "${key}": the writer is already closed or aborted`);
+        }
+        finished = true;
+        try {
+          if (pendingLength > 0 || parts.length === 0) {
+            await flushPending();
+          }
+          await this.s3.send(
+            new CompleteMultipartUploadCommand({
+              Bucket: bucket,
+              Key: key,
+              UploadId: uploadId,
+              MultipartUpload: {
+                Parts: [...parts].sort((a, b) => a.PartNumber! - b.PartNumber!),
+              },
+            })
+          );
+        } catch (e) {
+          return abortAfterFailure(e);
+        }
+        afLogger.debug(`Completed multipart upload "${uploadId}" for key "${key}" with ${parts.length} part(s)`);
+      }),
+
+      abort: (): Promise<void> => enqueue(async () => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        pending = [];
+        pendingLength = 0;
+        await abortUpload();
+        afLogger.debug(`Aborted multipart upload "${uploadId}" for key "${key}"`);
+      }),
+    };
   }
 }
