@@ -37,6 +37,8 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   // S3 rejects with "OperationAborted" (409).
   private static lifecycleSetupByBucket: Map<string, Promise<void>> = new Map();
 
+  private static strictContentTypeWarned = false;
+
   constructor(options: AdapterOptions) {
     this.options = options;
   }
@@ -50,7 +52,11 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
       Key: key,
       Tagging: tagline,
     });
-    const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn, unhoistableHeaders: new Set(['x-amz-tagging']) });
+    const uploadUrl = await getSignedUrl(this.s3, command, {
+      expiresIn,
+      unhoistableHeaders: new Set(['x-amz-tagging']),
+      ...(this.options.strictContentType && { signableHeaders: new Set(['content-type']) }),
+    });
     return {
       uploadUrl,
       uploadExtraParams: {
@@ -108,6 +114,10 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
   }
 
   async setupLifecycle(): Promise<void> {
+    if (!this.options.strictContentType && !AdminForthAdapterS3Storage.strictContentTypeWarned) {
+      AdminForthAdapterS3Storage.strictContentTypeWarned = true;
+      afLogger.warn(`strictContentType is off: uploads can be stored with any Content-Type sent by the client, e.g. text/html. Update @adminforth/bulk-ai-flow, markdown, rich-editor and oauth, then set strictContentType: true. See https://adminforth.dev/docs/tutorial/Adapters/storage-adapters/#strict-content-type`);
+    }
     if (!this.options.accessKeyId || !this.options.secretAccessKey) {
       throw new Error("Missing AWS credentials in environment variables");
     }
