@@ -43,11 +43,12 @@ export default class AdminForthAdapterS3Storage implements StorageAdapter {
     this.options = options;
   }
 
-  async getUploadSignedUrl(key: string, contentType: string, expiresIn = 3600): Promise<{ uploadUrl: string, uploadExtraParams:  Record<string, string> }> {
+  async getUploadSignedUrl(key: string, contentType: string, expiresIn = 3600, contentLength?: number): Promise<{ uploadUrl: string, uploadExtraParams:  Record<string, string> }> {
     const tagline = `${CLEANUP_TAG_KEY}=true`;
     const command = new PutObjectCommand({
       Bucket: this.options.bucket,
       ContentType: contentType,
+      ContentLength: contentLength,
       ACL: (this.options.s3ACL || 'private') as  ObjectCannedACL,
       Key: key,
       Tagging: tagline,
